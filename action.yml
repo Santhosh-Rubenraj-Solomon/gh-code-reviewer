@@ -1,0 +1,52 @@
+name: gh-code-reviewer
+description: Multi-stage LLM review for pull requests - triage, deep review, critic, and a summary comment.
+author: Santhosh Rubenraj
+branding:
+  icon: eye
+  color: blue
+
+inputs:
+  anthropic-api-key:
+    description: Anthropic API key (needed when any tier uses an anthropic:* model, which is the default)
+    required: false
+  google-api-key:
+    description: Google Generative AI key (needed when any tier uses a google:* model)
+    required: false
+  github-token:
+    description: Token used to read the PR and post comments
+    required: false
+    default: ${{ github.token }}
+  persona:
+    description: Voice for the summary intro - neutral, mentor, terse or detective
+    required: false
+    default: neutral
+  fail-on:
+    description: Fail the job when a finding is at or above this severity (critical, high, medium, low). Empty = never fail.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@v2
+
+    - name: Install gh-code-reviewer
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: bun install --frozen-lockfile --production
+
+    - name: Review pull request
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        GOOGLE_GENERATIVE_AI_API_KEY: ${{ inputs.google-api-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GHR_PERSONA: ${{ inputs.persona }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        ACTION_PATH: ${{ github.action_path }}
+      # Inputs reach the script only through env vars, never through ${{ }} in the
+      # script body, so a crafted input cannot inject shell commands.
+      run: |
+        args=(review --post --no-cache)
+        if [ -n "$FAIL_ON" ]; then args+=(--fail-on "$FAIL_ON"); fi
+        bun "$ACTION_PATH/src/cli.ts" "${args[@]}"

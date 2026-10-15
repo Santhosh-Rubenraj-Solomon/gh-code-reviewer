@@ -1,0 +1,6 @@
+node_modules/
+ghr
+*.lmdb
+*.lmdb-lock
+.DS_Store
+review.md

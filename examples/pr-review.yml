@@ -1,0 +1,27 @@
+# Copy to .github/workflows/pr-review.yml in the repository you want reviewed,
+# and add ANTHROPIC_API_KEY under Settings -> Secrets and variables -> Actions.
+name: AI code review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout lets the reviewer read .github/code-review.md (team rules).
+      - uses: actions/checkout@v4
+      - uses: YOUR_GITHUB_USERNAME/gh-code-reviewer@v0.1.0
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          fail-on: critical
