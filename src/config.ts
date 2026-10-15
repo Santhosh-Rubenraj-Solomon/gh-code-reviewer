@@ -114,7 +114,7 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
 
 export function validateConfig(config: Config): void {
   if (!/^[a-z0-9-]+$/.test(config.persona)) {
-    throw new Error(`Persona "${config.persona}" must be lowercase letters, digits and dashes`);
+    throw new Error(`The persona "${config.persona}" must be lowercase letters, digits and dashes`);
   }
   for (const id of Object.values(config.tiers)) parseModelId(id);
   for (const [stage, tier] of Object.entries(config.stageTiers)) {
