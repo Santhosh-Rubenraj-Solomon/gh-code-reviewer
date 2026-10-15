@@ -137,17 +137,23 @@ describe('reviewer', () => {
 
   test('drops findings for files that are not in the batch', async () => {
     const llm = new FakeLLM({
-      review: () => ({ findings: [finding(), finding({ file: 'src/imaginary.ts' })] }),
+      review: () =>
+        JSON.stringify({
+          fileReviews: [
+            { path: 'src/users.ts', whatChanged: 'x', findings: [finding(), finding({ file: 'src/imaginary.ts' })] },
+          ],
+        }),
     });
     const deps = makeDeps(llm);
-    const findings = await reviewBatch(deps, [{ file: users, includeContent: true }], context);
-    expect(findings).toHaveLength(1);
+    const reviews = await reviewBatch(deps, [{ file: users, includeContent: true }], context);
+    expect(reviews[0]!.findings).toHaveLength(1);
     expect(deps.logs).toContain('dropping finding for unknown file "src/imaginary.ts"');
   });
 
-  test('schema-invalid model output surfaces as an error', async () => {
-    const llm = new FakeLLM({ review: () => ({ findings: [{ file: 'src/users.ts' }] }) });
-    await expect(reviewBatch(makeDeps(llm), [{ file: users, includeContent: true }], context)).rejects.toThrow();
+  test('unparseable model output becomes a per-file error', async () => {
+    const llm = new FakeLLM({ review: () => 'not json at all' });
+    const reviews = await reviewBatch(makeDeps(llm), [{ file: users, includeContent: true }], context);
+    expect(reviews[0]!.status).toBe('error');
   });
 });
 
@@ -218,6 +224,27 @@ describe('critic', () => {
 
 describe('consolidate', () => {
   const cs = changeSet([file({ path: 'src/users.ts' })]);
+  const answer = (overview: { overview: string; risk: string; highlights: string[] }) => ({
+    ...overview,
+    architectureChanges: [],
+    securityConcerns: [],
+    securityChecklist: {
+      impactsSecurity: false,
+      cryptographicChange: false,
+      secureChannelModified: false,
+      dataManagementChange: false,
+      otherSecurityImpact: false,
+    },
+    recommendations: [],
+    functionality: { isComplete: true, missing: [], explanation: '' },
+    unitTests: [],
+    e2eTests: [],
+    codeQuality: { patterns: '', complexity: '', maintainability: '' },
+    dependencies: { added: '', impact: '', security: '' },
+    performance: { bottlenecks: '', resources: '', scalability: '' },
+    limitations: [],
+    completeness: 'complete',
+  });
 
   test('riskFromFindings follows the worst severity', () => {
     expect(riskFromFindings([])).toBe('low');
@@ -227,14 +254,14 @@ describe('consolidate', () => {
   });
 
   test('never reports less risk than the findings imply', async () => {
-    const llm = new FakeLLM({ consolidate: () => ({ overview: 'Fine.', risk: 'low', highlights: [] }) });
+    const llm = new FakeLLM({ consolidate: () => answer({ overview: 'Fine.', risk: 'low', highlights: [] }) });
     const result = await consolidate(makeDeps(llm), cs, {}, [finding({ severity: 'critical' })]);
     expect(result.risk).toBe('high');
     expect(result.overview).toBe('Fine.');
   });
 
   test('may report more risk than the findings imply', async () => {
-    const llm = new FakeLLM({ consolidate: () => ({ overview: 'Risky migration.', risk: 'high', highlights: ['migration'] }) });
+    const llm = new FakeLLM({ consolidate: () => answer({ overview: 'Risky migration.', risk: 'high', highlights: ['migration'] }) });
     expect((await consolidate(makeDeps(llm), cs, {}, [])).risk).toBe('high');
   });
 
@@ -245,7 +272,7 @@ describe('consolidate', () => {
       },
     });
     const result = await consolidate(makeDeps(llm), cs, {}, [finding()]);
-    expect(result).toEqual({ overview: '1 file(s) changed; 1 verified finding(s).', risk: 'high', highlights: ['SQL injection in findUser'] });
+    expect(result).toMatchObject({ overview: '1 file(s) changed; 1 verified finding(s).', risk: 'high', highlights: ['SQL injection in findUser'] });
   });
 });
 
@@ -262,7 +289,7 @@ describe('personaIntro', () => {
     const llm = new FakeLLM({ persona: () => '  Elementary: the query is unsafe.  ' });
     const intro = await personaIntro(makeDeps(llm), 'detective', overview, [finding()]);
     expect(intro).toBe('Elementary: the query is unsafe.');
-    expect(llm.calls[0]!.prompt).toContain('Victorian consulting detective');
+    expect(llm.calls[0]!.prompt).toContain('methodical investigator');
   });
 
   test('errors are swallowed because the intro is cosmetic', async () => {

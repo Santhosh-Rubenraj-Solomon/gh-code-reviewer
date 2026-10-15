@@ -88,3 +88,10 @@ test('modelForStage resolves through the tier table', () => {
   expect(modelForStage(config, 'critic')).toBe(DEFAULT_TIERS.balanced);
   expect(modelForStage(config, 'triage')).toBe(DEFAULT_TIERS.cheap);
 });
+
+test('GHR_DATA_DIR moves the store, personas and outputs together', () => {
+  const config = loadConfig({ env: { GHR_DATA_DIR: '/runner/tmp/ghr' }, home: '/home/s', readText: () => null });
+  expect(config.dataDir).toBe('/runner/tmp/ghr');
+  expect(config.storePath).toBe('/runner/tmp/ghr/store');
+  expect(config.personaDir).toBe('/runner/tmp/ghr/personas');
+});

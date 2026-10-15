@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseModelId } from './models';
+import type { SecurityContextRule } from './security-context';
 import type { PersonaName, Stage, Tier } from './types';
 
 export interface Config {
@@ -18,9 +19,25 @@ export interface Config {
   reviewConcurrency: number;
   maxRetries: number;
   retryBaseDelayMs: number;
+  /** Root of everything the tool keeps between runs: store, memory, history, logs, reports. */
+  dataDir: string;
   storePath: string;
-  /** Repo-relative files whose contents are added to the review prompt as team rules. */
-  rulesFiles: string[];
+  impact: { enabled: boolean; maxDepth: number; maxRepoFiles: number; timeoutMs: number };
+  /** Skip the evidence check of the consolidated review (summary, security concerns, tests). */
+  skipValidation: boolean;
+  /** Directory of extra persona JSON files. */
+  personaDir: string;
+  /** Add a short note to the PR when code changed but no docs did. */
+  docsNotice: boolean;
+  /** Command used to open local markdown reports; empty to not open them. */
+  editor: string;
+  /** Exact repo-root paths that are never reviewed. */
+  rootConfigFiles?: string[];
+  rules: { maxFileChars: number; maxTotalChars: number };
+  /** Extra review emphasis by path; replaces the built-in defaults when set. */
+  securityContexts?: SecurityContextRule[];
+  /** Where to look for new releases, e.g. "santhosh/gh-code-reviewer". Unset disables the check. */
+  updateRepo?: string;
 }
 
 export const DEFAULT_TIERS: Record<Tier, string> = {
@@ -54,8 +71,14 @@ export function defaultConfig(home: string = homedir()): Config {
     reviewConcurrency: 2,
     maxRetries: 3,
     retryBaseDelayMs: 2_000,
+    dataDir: join(home, '.gh-code-reviewer'),
     storePath: join(home, '.gh-code-reviewer', 'store'),
-    rulesFiles: ['.github/code-review.md', 'CODE_REVIEW.md'],
+    impact: { enabled: true, maxDepth: 3, maxRepoFiles: 10_000, timeoutMs: 30_000 },
+    skipValidation: false,
+    personaDir: join(home, '.gh-code-reviewer', 'personas'),
+    docsNotice: false,
+    editor: process.env.REVIEW_EDITOR ?? '',
+    rules: { maxFileChars: 10_000, maxTotalChars: 50_000 },
   };
 }
 
@@ -82,6 +105,12 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
   const read = options.readText ?? readIfExists;
 
   const base = defaultConfig(home);
+  if (env.GHR_DATA_DIR) {
+    // Everything the tool keeps moves with the data directory unless the rc file says otherwise.
+    base.dataDir = env.GHR_DATA_DIR;
+    base.storePath = join(env.GHR_DATA_DIR, 'store');
+    base.personaDir = join(env.GHR_DATA_DIR, 'personas');
+  }
   let rc: Partial<Config> = {};
   const rcText = read(rcPath);
   if (rcText) {
@@ -97,6 +126,8 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
     ...rc,
     tiers: { ...base.tiers, ...rc.tiers },
     stageTiers: { ...base.stageTiers, ...rc.stageTiers },
+    impact: { ...base.impact, ...rc.impact },
+    rules: { ...base.rules, ...rc.rules },
   };
 
   config.anthropicApiKey = env.ANTHROPIC_API_KEY || config.anthropicApiKey;
@@ -107,6 +138,8 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
   if (env.GHR_MODEL_DEEP) config.tiers.deep = env.GHR_MODEL_DEEP;
   if (env.GHR_MODEL_BALANCED) config.tiers.balanced = env.GHR_MODEL_BALANCED;
   if (env.GHR_MODEL_CHEAP) config.tiers.cheap = env.GHR_MODEL_CHEAP;
+  if (env.GHR_EDITOR) config.editor = env.GHR_EDITOR;
+  if (env.GHR_UPDATE_REPO) config.updateRepo = env.GHR_UPDATE_REPO;
 
   validateConfig(config);
   return config;

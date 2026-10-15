@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { breachesThreshold, parseSeverity } from '../src/gate';
 import { truncate } from '../src/pipeline/deps';
-import { loadRules } from '../src/rules';
 import { mapLimit } from '../src/utils/pool';
 import { isRetryableError, withRetry } from '../src/utils/retry';
 import { estimateTokens } from '../src/utils/tokens';
@@ -87,6 +86,35 @@ test('mapLimit keeps order and never exceeds the limit', async () => {
   expect(await mapLimit([], 3, async () => 1)).toEqual([]);
 });
 
+test('mapLimit stops handing out items after a critical failure and rejects with the first error', async () => {
+  const started: number[] = [];
+  const settled: number[] = [];
+  const critical = Object.assign(new Error('retries exhausted'), { name: 'CriticalFailureError' });
+  const promise = mapLimit([0, 1, 2, 3, 4], 2, async (_n, i) => {
+    started.push(i);
+    if (i === 1) {
+      await new Promise(r => setTimeout(r, 5));
+      throw critical;
+    }
+    await new Promise(r => setTimeout(r, i === 0 ? 20 : 1));
+    settled.push(i);
+    return i;
+  });
+  await expect(promise).rejects.toBe(critical);
+  // Item 0 was in flight and finished before the rejection; nothing new started after item 1 failed.
+  expect(settled).toContain(0);
+  expect(started).toEqual([0, 1]);
+});
+
+test('mapLimit absorbs later rejections from items already in flight', async () => {
+  const first = new Error('first');
+  const promise = mapLimit([0, 1], 2, async (_n, i) => {
+    await new Promise(r => setTimeout(r, i === 0 ? 1 : 5));
+    throw i === 0 ? first : new Error('second');
+  });
+  await expect(promise).rejects.toBe(first);
+});
+
 test('estimateTokens is zero for empty text and grows with length', () => {
   expect(estimateTokens('')).toBe(0);
   expect(estimateTokens('hello world')).toBeGreaterThan(0);
@@ -113,9 +141,3 @@ describe('severity gate', () => {
   });
 });
 
-test('loadRules joins existing rule files and skips missing ones', () => {
-  const files: Record<string, string> = { '/repo/.github/code-review.md': 'Use parameterised SQL.\n' };
-  const rules = loadRules(['.github/code-review.md', 'CODE_REVIEW.md'], '/repo', p => files[p] ?? null);
-  expect(rules).toBe('<!-- from .github/code-review.md -->\nUse parameterised SQL.');
-  expect(loadRules(['missing.md'], '/repo', () => null)).toBeUndefined();
-});

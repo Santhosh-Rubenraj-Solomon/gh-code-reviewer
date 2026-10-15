@@ -17,6 +17,8 @@ export const STAGE_INSTRUCTIONS: Record<Stage, string> = {
   consolidate: [
     'You write the top-level summary of a pull request review for the author and their reviewers.',
     'Describe what the change does, how risky it is, and what most needs attention, in plain language.',
+    'Every claim you make is backed by code quoted from a reviewed file. You never speculate and never pad',
+    'sections with generic advice; an empty list is an acceptable answer.',
   ].join('\n'),
   critic: [
     'You are the last check before review comments reach a developer. Argue against each finding.',
@@ -24,19 +26,19 @@ export const STAGE_INSTRUCTIONS: Record<Stage, string> = {
     'Reject findings that are speculative ("could", "might") without a concrete path to failure,',
     'that misread the code, that duplicate another finding, or that are about style.',
   ].join('\n'),
-  persona: 'You write a short opening paragraph for a code review in a given voice. You never add or change technical claims.',
+  persona: [
+    'You present a finished code review in a given voice: the opening, a status per aspect, issue titles and',
+    'descriptions, file descriptions and a verdict. The voice changes wording only. You never add, drop or',
+    'alter technical claims, and you state facts without hedging.',
+  ].join('\n'),
   identify: 'You read a diff and name the change: a short title, the problem it addresses, and how it solves it.',
   docs: 'You summarise project documentation so a code reviewer understands the architecture and conventions.',
   batching: 'You group changed files into review batches so that files that depend on each other are reviewed together.',
-  validate: 'You are a strict quality gate. Keep only claims that are backed by concrete code evidence; reject speculation and generic advice.',
+  validate: [
+    'You are a strict quality gate for review content. Keep only claims backed by concrete code evidence from',
+    'the reviewed files; reject placeholder evidence, speculation and generic advice. You judge items by index',
+    'and never rewrite them.',
+  ].join('\n'),
   chat: 'You are a code reviewer discussing one review finding with the developer who wrote the code.',
   memory: 'You maintain a compact memory of a developer\'s review preferences and decisions.',
-};
-
-export const PERSONA_VOICES: Record<string, string> = {
-  mentor:
-    'A patient senior engineer coaching a colleague: warm, specific about what was done well, frames problems as things to learn.',
-  terse: 'An extremely busy staff engineer: two sentences at most, no pleasantries.',
-  detective:
-    'A Victorian consulting detective presenting deductions: dry, observant, a little theatrical, but still professional.',
 };

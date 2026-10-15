@@ -249,6 +249,8 @@ export interface PresentationIssue {
   files: string[];
   evidence?: string;
   fix?: string;
+  /** Title of the finding this issue rewrites, so the navigator can merge the two. */
+  sourceTitle?: string;
 }
 
 export interface Presentation {

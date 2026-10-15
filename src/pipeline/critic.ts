@@ -3,30 +3,41 @@ import { VerdictSchema } from '../schemas';
 import type { ChangedFile, Finding, RejectedFinding } from '../types';
 import { truncate, type StageDeps } from './deps';
 
-const squash = (text: string) => text.replace(/\s+/g, ' ').trim();
+/** Collapses all whitespace so reflowed quotes still match. */
+export const squash = (text: string) => text.replace(/\s+/g, ' ').trim();
+
+/** Every line of the diff (added, removed and context) plus the full content, whitespace-collapsed. */
+export function fileHaystack(file: ChangedFile): string {
+  const diffText = parsePatch(file.patch)
+    .flatMap(h => h.lines.map(l => l.text))
+    .join('\n');
+  return squash(`${diffText}\n${file.content ?? ''}`);
+}
+
+/** True when `snippet` occurs in the file's diff or content, tolerating reflowed whitespace and diff markers. */
+export function snippetAppears(snippet: string, file: ChangedFile | undefined): boolean {
+  if (!file) return false;
+  const haystack = fileHaystack(file);
+
+  const quoted = squash(snippet);
+  if (quoted && haystack.includes(quoted)) return true;
+
+  // Models sometimes keep the diff markers; try again without them.
+  const unmarked = squash(
+    snippet
+      .split('\n')
+      .map(line => line.replace(/^[+-]/, ''))
+      .join('\n'),
+  );
+  return unmarked.length > 0 && haystack.includes(unmarked);
+}
 
 /**
  * Deterministic grounding check: the quoted evidence must actually exist in the diff
  * or in the file. This catches invented code before any model is asked about it.
  */
 export function evidenceAppears(finding: Finding, file: ChangedFile | undefined): boolean {
-  if (!file) return false;
-  const diffText = parsePatch(file.patch)
-    .flatMap(h => h.lines.map(l => l.text))
-    .join('\n');
-  const haystack = squash(`${diffText}\n${file.content ?? ''}`);
-
-  const quoted = squash(finding.evidence);
-  if (quoted && haystack.includes(quoted)) return true;
-
-  // Models sometimes keep the diff markers; try again without them.
-  const unmarked = squash(
-    finding.evidence
-      .split('\n')
-      .map(line => line.replace(/^[+-]/, ''))
-      .join('\n'),
-  );
-  return unmarked.length > 0 && haystack.includes(unmarked);
+  return snippetAppears(finding.evidence, file);
 }
 
 export function buildCriticPrompt(findings: Finding[], files: Map<string, ChangedFile>): string {

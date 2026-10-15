@@ -103,7 +103,7 @@ describe('publishToGitHub', () => {
   test('posts a review with inline comments and a summary comment', async () => {
     const { gh, requests } = setup([]);
     const result = await publishToGitHub(gh, ref, report(), cs);
-    expect(result).toEqual({ inlinePosted: 1, duplicatesSkipped: 0, summary: 'created' });
+    expect(result).toEqual({ inlinePosted: 1, duplicatesSkipped: 0, summary: 'created', summaryParts: 1 });
     const review = requests.find(r => r.url.endsWith('/reviews'))!;
     expect((review.body as { commit_id: string }).commit_id).toBe('abc1234def');
     const summary = requests.find(r => r.method === 'POST' && r.url.includes('/issues/7/comments'))!;

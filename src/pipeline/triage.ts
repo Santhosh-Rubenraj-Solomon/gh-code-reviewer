@@ -1,6 +1,7 @@
-import { TriageSchema } from '../schemas';
+import { z } from 'zod';
 import type { ChangedFile, ChangeSet, SkippedFile } from '../types';
 import { truncate, type StageDeps } from './deps';
+import { isProjectDoc } from './docs';
 
 const SKIP_RULES: { pattern: RegExp; reason: string }[] = [
   {
@@ -13,8 +14,19 @@ const SKIP_RULES: { pattern: RegExp; reason: string }[] = [
   { pattern: /\.snap$/, reason: 'test snapshot' },
 ];
 
+/** Tooling config at the repository root that rarely changes behaviour. Matched by exact path. */
+export const DEFAULT_ROOT_CONFIG_FILES = ['.gitignore', '.prettierrc', '.editorconfig', '.eslintignore'];
+
+export interface StaticTriageOptions {
+  rootConfigFiles?: string[];
+}
+
 /** Cheap, deterministic filtering that needs no model call. */
-export function staticTriage(files: ChangedFile[]): { candidates: ChangedFile[]; skipped: SkippedFile[] } {
+export function staticTriage(
+  files: ChangedFile[],
+  options: StaticTriageOptions = {},
+): { candidates: ChangedFile[]; skipped: SkippedFile[] } {
+  const rootConfig = new Set(options.rootConfigFiles ?? DEFAULT_ROOT_CONFIG_FILES);
   const candidates: ChangedFile[] = [];
   const skipped: SkippedFile[] = [];
   for (const file of files) {
@@ -26,6 +38,14 @@ export function staticTriage(files: ChangedFile[]): { candidates: ChangedFile[];
       skipped.push({ path: file.path, reason: 'no text diff (binary, too large, or rename only)' });
       continue;
     }
+    if (rootConfig.has(file.path)) {
+      skipped.push({ path: file.path, reason: 'tooling config' });
+      continue;
+    }
+    if (isProjectDoc(file.path)) {
+      skipped.push({ path: file.path, reason: 'project documentation' });
+      continue;
+    }
     const rule = SKIP_RULES.find(r => r.pattern.test(file.path));
     if (rule) skipped.push({ path: file.path, reason: rule.reason });
     else candidates.push(file);
@@ -33,58 +53,101 @@ export function staticTriage(files: ChangedFile[]): { candidates: ChangedFile[];
   return { candidates, skipped };
 }
 
-export function buildTriagePrompt(changeSet: ChangeSet, files: ChangedFile[]): string {
+const TRIAGE_DIFF_CHARS = 1_500;
+
+const TriageSchema = z.object({
+  files: z.array(
+    z.object({
+      path: z.string(),
+      review: z.boolean(),
+      reason: z.string(),
+      summary: z.string(),
+      /** Other changed files this one uses or is used by. */
+      relatedFiles: z.array(z.string()).optional(),
+    }),
+  ),
+});
+
+type TriageVerdict = z.infer<typeof TriageSchema>['files'][number];
+
+export interface TriageOptions {
+  docsSummary?: string;
+}
+
+export function buildTriagePrompt(changeSet: ChangeSet, files: ChangedFile[], options: TriageOptions = {}): string {
   const listing = files
     .map(
       f =>
         `### ${f.path} (${f.status}, +${f.additions}/-${f.deletions})\n` +
         '```diff\n' +
-        truncate(f.patch, 2_500) +
+        truncate(f.patch, TRIAGE_DIFF_CHARS) +
         '\n```',
     )
     .join('\n\n');
-  return [
-    `Pull request: ${changeSet.title}`,
-    changeSet.description ? `Description:\n${truncate(changeSet.description, 2_000)}` : '',
+  const parts = [`Pull request: ${changeSet.title}`];
+  if (changeSet.description) parts.push(`Description:\n${truncate(changeSet.description, 2_000)}`);
+  if (options.docsSummary?.trim()) {
+    parts.push(`Project documentation, summarised:\n${truncate(options.docsSummary.trim(), 3_000)}`);
+  }
+  parts.push(
     '',
-    'For every file below return: path (exactly as given), review (true/false), a short reason,',
-    'and a one-sentence summary of what changed in that file.',
+    'For every file below return:',
+    '- path, exactly as given;',
+    '- review: true unless the change clearly cannot hide a defect (whitespace only, images, generated output);',
+    '  when in doubt answer true;',
+    '- reason: a few words explaining the decision;',
+    '- summary: one sentence (under 100 words) on what changed in that file;',
+    '- relatedFiles: other paths from this list that this file imports, calls, or is called by (empty if none).',
+    'Diffs are cut short, so judge by what you can see.',
     '',
     listing,
-  ].join('\n');
+  );
+  return parts.join('\n');
 }
 
 export interface TriageResult {
   reviewable: ChangedFile[];
   skipped: SkippedFile[];
   summaries: Record<string, string>;
+  /** Changed files each file depends on or is used by, as reported by the model. */
+  dependencies: Record<string, string[]>;
 }
 
 /**
  * Asks the cheap model which candidates need a deep review. Fails open: a file the
  * model forgets, or a model error, means the file is reviewed rather than dropped.
  */
-export async function triage(deps: StageDeps, changeSet: ChangeSet, candidates: ChangedFile[]): Promise<TriageResult> {
-  if (candidates.length === 0) return { reviewable: [], skipped: [], summaries: {} };
+export async function triage(
+  deps: StageDeps,
+  changeSet: ChangeSet,
+  candidates: ChangedFile[],
+  options: TriageOptions = {},
+): Promise<TriageResult> {
+  if (candidates.length === 0) return { reviewable: [], skipped: [], summaries: {}, dependencies: {} };
 
-  let verdicts: Map<string, { review: boolean; reason: string; summary: string }>;
+  let verdicts: Map<string, TriageVerdict>;
   try {
-    const result = await deps.llm.generateObject('triage', buildTriagePrompt(changeSet, candidates), TriageSchema);
+    const prompt = buildTriagePrompt(changeSet, candidates, options);
+    const result = await deps.llm.generateObject('triage', prompt, TriageSchema);
     deps.cost.record('triage', result.model, result.usage);
     verdicts = new Map(result.object.files.map(f => [f.path, f]));
   } catch (error) {
     deps.log(`triage failed, reviewing every file: ${(error as Error).message}`);
-    return { reviewable: candidates, skipped: [], summaries: {} };
+    return { reviewable: candidates, skipped: [], summaries: {}, dependencies: {} };
   }
 
+  const known = new Set(candidates.map(f => f.path));
   const reviewable: ChangedFile[] = [];
   const skipped: SkippedFile[] = [];
   const summaries: Record<string, string> = {};
+  const dependencies: Record<string, string[]> = {};
   for (const file of candidates) {
     const verdict = verdicts.get(file.path);
     if (verdict?.summary) summaries[file.path] = verdict.summary;
+    const related = [...new Set(verdict?.relatedFiles ?? [])].filter(p => p !== file.path && known.has(p));
+    if (related.length) dependencies[file.path] = related;
     if (verdict && !verdict.review) skipped.push({ path: file.path, reason: `triage: ${verdict.reason}` });
     else reviewable.push(file);
   }
-  return { reviewable, skipped, summaries };
+  return { reviewable, skipped, summaries, dependencies };
 }

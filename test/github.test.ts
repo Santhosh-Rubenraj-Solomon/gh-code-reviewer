@@ -166,3 +166,136 @@ describe('loadPullRequest', () => {
     expect(contentCalls[0]!.url).toContain('ref=headsha');
   });
 });
+
+describe('GitHubClient retries', () => {
+  type Reply = { status: number; body?: unknown; headers?: Record<string, string> } | Error;
+
+  /** Replies in order (the last one repeats), recording every call. */
+  function scripted(replies: Reply[], options: { retries?: number; now?: () => number } = {}) {
+    const calls: string[] = [];
+    const delays: number[] = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${new URL(String(input)).pathname}`);
+      const reply = replies[Math.min(calls.length - 1, replies.length - 1)]!;
+      if (reply instanceof Error) throw reply;
+      if (reply.status === 204) return new Response(null, { status: 204 });
+      return new Response(typeof reply.body === 'string' ? reply.body : JSON.stringify(reply.body ?? {}), {
+        status: reply.status,
+        headers: { 'Content-Type': 'application/json', ...reply.headers },
+      });
+    }) as unknown as typeof fetch;
+    const gh = new GitHubClient({
+      token: 't',
+      fetch: fetchImpl,
+      sleep: async ms => {
+        delays.push(ms);
+      },
+      ...options,
+    });
+    return { gh, calls, delays };
+  }
+  const pull = { title: 'T', body: '', base: { ref: 'main' }, head: { sha: 's' } };
+
+  test('retries 5xx and network errors with exponential backoff', async () => {
+    const { gh, calls, delays } = scripted([{ status: 502, body: 'bad gateway' }, new TypeError('fetch failed'), { status: 200, body: pull }]);
+    expect((await gh.getPull(ref)).title).toBe('T');
+    expect(calls).toHaveLength(3);
+    expect(delays).toEqual([1000, 2000]);
+  });
+
+  test('gives up after the configured retries and keeps the status', async () => {
+    const { gh, calls, delays } = scripted([{ status: 503, body: 'down' }], { retries: 2 });
+    const error = await gh.getPull(ref).catch(e => e);
+    expect(error).toBeInstanceOf(GitHubError);
+    expect(error.status).toBe(503);
+    expect(calls).toHaveLength(3);
+    expect(delays).toEqual([1000, 2000]);
+  });
+
+  test('honours retry-after on 429, capped at 60 s', async () => {
+    const { gh, delays } = scripted([
+      { status: 429, headers: { 'retry-after': '5' } },
+      { status: 429, headers: { 'retry-after': '600' } },
+      { status: 200, body: pull },
+    ]);
+    await gh.getPull(ref);
+    expect(delays).toEqual([5000, 60_000]);
+  });
+
+  test('retries a 403 only when it is a rate limit, waiting for x-ratelimit-reset', async () => {
+    const now = () => 1_000_000_000_000;
+    const primary = scripted(
+      [
+        { status: 403, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(1_000_000_000 + 12) } },
+        { status: 200, body: pull },
+      ],
+      { now },
+    );
+    await primary.gh.getPull(ref);
+    expect(primary.delays).toEqual([12_000]);
+
+    const secondary = scripted([
+      { status: 403, body: { message: 'You have exceeded a secondary rate limit.' } },
+      { status: 200, body: pull },
+    ]);
+    await secondary.gh.getPull(ref);
+    expect(secondary.calls).toHaveLength(2);
+    expect(secondary.delays).toEqual([1000]);
+
+    const forbidden = scripted([{ status: 403, body: 'Resource not accessible by integration' }]);
+    const error = await forbidden.gh.getPull(ref).catch(e => e);
+    expect(error.status).toBe(403);
+    expect(error.rateLimited).toBe(false);
+    expect(forbidden.calls).toHaveLength(1);
+  });
+
+  test.each([401, 404, 422])('does not retry %d', async status => {
+    const { gh, calls, delays } = scripted([{ status, body: 'nope' }]);
+    const error = await gh.createReview(ref, 'sha', 'b', []).catch(e => e);
+    expect(error).toBeInstanceOf(GitHubError);
+    expect(error.status).toBe(status);
+    expect(calls).toHaveLength(1);
+    expect(delays).toEqual([]);
+  });
+
+  test('deleteIssueComment sends DELETE and accepts 204', async () => {
+    const { gh, calls } = scripted([{ status: 204 }]);
+    await gh.deleteIssueComment(ref, 42);
+    expect(calls).toEqual(['DELETE /repos/santhosh/demo/issues/comments/42']);
+  });
+
+  test('upsertIssueCommentIn uses a pre-fetched listing', async () => {
+    const { gh, calls } = scripted([{ status: 200, body: {} }]);
+    expect(await gh.upsertIssueCommentIn(ref, [{ id: 9, body: '<!-- m -->' }], '<!-- m -->', 'new')).toBe('updated');
+    expect(await gh.upsertIssueCommentIn(ref, [], '<!-- m -->', 'new')).toBe('created');
+    expect(calls).toEqual(['PATCH /repos/santhosh/demo/issues/comments/9', 'POST /repos/santhosh/demo/issues/7/comments']);
+  });
+});
+
+describe('GitHubClient POST retries', () => {
+  test('a POST is not repeated after a 5xx, but is after a rate limit', async () => {
+    let posts = 0;
+    const fake = fakeFetch([
+      {
+        method: 'POST',
+        match: /\/reviews$/,
+        respond: () => (++posts === 1 ? { status: 502, text: 'bad gateway' } : { json: {} }),
+      },
+    ]);
+    const gh = new GitHubClient({ token: 't', fetch: fake.fetch, sleep: async () => {} });
+    await expect(gh.createReview(ref, 'sha', 'b', [])).rejects.toThrow(/502/);
+    expect(posts).toBe(1);
+
+    let limited = 0;
+    const fake2 = fakeFetch([
+      {
+        method: 'POST',
+        match: /\/reviews$/,
+        respond: () => (++limited === 1 ? { status: 429, text: 'slow down' } : { json: {} }),
+      },
+    ]);
+    const gh2 = new GitHubClient({ token: 't', fetch: fake2.fetch, sleep: async () => {} });
+    await gh2.createReview(ref, 'sha', 'b', []);
+    expect(limited).toBe(2);
+  });
+});

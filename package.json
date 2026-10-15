@@ -1,6 +1,6 @@
 {
   "name": "gh-code-reviewer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Multi-stage LLM code review for GitHub pull requests: triage, review, critic, summary.",
   "author": "Santhosh Rubenraj",
   "license": "MIT",

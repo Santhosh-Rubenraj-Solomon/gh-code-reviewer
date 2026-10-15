@@ -17,13 +17,34 @@ inputs:
     required: false
     default: ${{ github.token }}
   persona:
-    description: Voice for the summary intro - neutral, mentor, terse or detective
+    description: Voice of the review - neutral, mentor, terse, detective, captain, monk, random, or none (plain summary)
     required: false
     default: neutral
   fail-on:
     description: Fail the job when a finding is at or above this severity (critical, high, medium, low). Empty = never fail.
     required: false
     default: ''
+  impact-analysis:
+    description: Trace which other files use the changed code (needs actions/checkout before this step)
+    required: false
+    default: 'true'
+  skip-validation:
+    description: Skip the evidence check of the summary, security concerns and test requirements
+    required: false
+    default: 'false'
+  docs-notice:
+    description: Add a short note when code changed but no documentation did
+    required: false
+    default: 'false'
+  export-tests:
+    description: Also write test-plan.json and the impact graph into the output-dir output (upload it with actions/upload-artifact)
+    required: false
+    default: 'false'
+
+outputs:
+  output-dir:
+    description: Directory with exported files (test plan, impact graphs) and the run log
+    value: ${{ steps.review.outputs.output-dir }}
 
 runs:
   using: composite
@@ -36,6 +57,7 @@ runs:
       run: bun install --frozen-lockfile --production
 
     - name: Review pull request
+      id: review
       shell: bash
       env:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
@@ -43,10 +65,20 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         GHR_PERSONA: ${{ inputs.persona }}
         FAIL_ON: ${{ inputs.fail-on }}
+        IMPACT: ${{ inputs.impact-analysis }}
+        SKIP_VALIDATION: ${{ inputs.skip-validation }}
+        DOCS_NOTICE: ${{ inputs.docs-notice }}
+        EXPORT_TESTS: ${{ inputs.export-tests }}
         ACTION_PATH: ${{ github.action_path }}
+        GHR_DATA_DIR: ${{ runner.temp }}/gh-code-reviewer
       # Inputs reach the script only through env vars, never through ${{ }} in the
       # script body, so a crafted input cannot inject shell commands.
       run: |
-        args=(review --post --no-cache)
+        echo "output-dir=$GHR_DATA_DIR" >> "$GITHUB_OUTPUT"
+        args=(review --post --ci)
         if [ -n "$FAIL_ON" ]; then args+=(--fail-on "$FAIL_ON"); fi
+        if [ "$IMPACT" != "true" ]; then args+=(--no-impact); fi
+        if [ "$SKIP_VALIDATION" = "true" ]; then args+=(--skip-validation); fi
+        if [ "$DOCS_NOTICE" = "true" ]; then args+=(--docs-notice); fi
+        if [ "$EXPORT_TESTS" = "true" ]; then args+=(--export-tests --impact-graph); fi
         bun "$ACTION_PATH/src/cli.ts" "${args[@]}"
