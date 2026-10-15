@@ -21,7 +21,7 @@ jobs:
     steps:
       # Checkout lets the reviewer read .github/code-review.md (team rules).
       - uses: actions/checkout@v4
-      - uses: YOUR_GITHUB_USERNAME/gh-code-reviewer@v0.1.0
+      - uses: Santhosh-Rubenraj-Solomon/gh-code-reviewer@v0.2.0
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           fail-on: critical

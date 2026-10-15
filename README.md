@@ -54,8 +54,7 @@ model failed.
 ## GitHub Actions
 
 1. Add `ANTHROPIC_API_KEY` (or `GOOGLE_GENERATIVE_AI_API_KEY`) as a repository secret.
-2. Copy [examples/pr-review.yml](examples/pr-review.yml) into `.github/workflows/` and replace
-   `YOUR_GITHUB_USERNAME`.
+2. Copy [examples/pr-review.yml](examples/pr-review.yml) into `.github/workflows/`.
 
 | Input | Default | |
 | --- | --- | --- |
@@ -134,7 +133,7 @@ Precedence: defaults < `~/.ghreviewrc.json` (or `$GHR_CONFIG`) < environment.
   "impact": { "enabled": true, "maxDepth": 3 },
   "securityContexts": [{ "name": "payments", "patterns": ["src/payments/**"], "instructions": "Check amounts are integers in minor units." }],
   "editor": "code",
-  "updateRepo": "your-username/gh-code-reviewer"
+  "updateRepo": "Santhosh-Rubenraj-Solomon/gh-code-reviewer"
 }
 ```
 
