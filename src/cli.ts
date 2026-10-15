@@ -14,7 +14,7 @@ import { loadRules } from './rules';
 import { loadLocalChanges } from './sources/local-git';
 import { loadPullRequest } from './sources/github-pr';
 import { LmdbReportCache, type ReportCache } from './store';
-import { PERSONA_NAMES, type ChangeSet, type PersonaName, type Stage } from './types';
+import { BUILT_IN_PERSONAS, type ChangeSet, type PersonaName, type Stage } from './types';
 
 const cli = meow(
   `
@@ -29,7 +29,7 @@ const cli = meow(
     --out <file>           Also write the summary markdown to a file
     --json                 Print the full report as JSON instead of markdown
     --base <ref>           Base for "local" (default: origin/main)
-    --persona <name>       ${PERSONA_NAMES.join(' | ')}
+    --persona <name>       ${BUILT_IN_PERSONAS.join(' | ')} | random | none
     --fail-on <severity>   Exit with code 2 if a finding is at or above this severity
     --fresh                Ignore the cached review for this commit
     --no-cache             Do not read or write the review cache

@@ -64,7 +64,7 @@ describe('loadConfig', () => {
 
 describe('validateConfig', () => {
   test('rejects an unknown persona', () => {
-    expect(() => validateConfig(testConfig({ persona: 'pirate' as never }))).toThrow(/persona/);
+    expect(() => validateConfig(testConfig({ persona: 'Not Valid!' }))).toThrow(/persona/);
   });
 
   test('rejects a malformed model id', () => {

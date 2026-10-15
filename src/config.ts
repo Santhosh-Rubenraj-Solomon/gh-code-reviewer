@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseModelId } from './models';
-import { PERSONA_NAMES, type PersonaName, type Stage, type Tier } from './types';
+import type { PersonaName, Stage, Tier } from './types';
 
 export interface Config {
   anthropicApiKey?: string;
@@ -30,11 +30,17 @@ export const DEFAULT_TIERS: Record<Tier, string> = {
 };
 
 export const DEFAULT_STAGE_TIERS: Record<Stage, Tier> = {
+  identify: 'cheap',
   triage: 'cheap',
+  docs: 'cheap',
+  batching: 'cheap',
   review: 'deep',
-  consolidate: 'deep',
   critic: 'balanced',
-  persona: 'cheap',
+  consolidate: 'deep',
+  validate: 'balanced',
+  persona: 'deep',
+  chat: 'balanced',
+  memory: 'cheap',
 };
 
 export function defaultConfig(home: string = homedir()): Config {
@@ -107,8 +113,8 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
 }
 
 export function validateConfig(config: Config): void {
-  if (!PERSONA_NAMES.includes(config.persona)) {
-    throw new Error(`Unknown persona "${config.persona}"; choose one of ${PERSONA_NAMES.join(', ')}`);
+  if (!/^[a-z0-9-]+$/.test(config.persona)) {
+    throw new Error(`Persona "${config.persona}" must be lowercase letters, digits and dashes`);
   }
   for (const id of Object.values(config.tiers)) parseModelId(id);
   for (const [stage, tier] of Object.entries(config.stageTiers)) {
