@@ -95,3 +95,11 @@ test('GHR_DATA_DIR moves the store, personas and outputs together', () => {
   expect(config.storePath).toBe('/runner/tmp/ghr/store');
   expect(config.personaDir).toBe('/runner/tmp/ghr/personas');
 });
+
+test('REVIEW_EDITOR and GHR_EDITOR set the editor; GHR_CONFIG moves the file setup writes', async () => {
+  expect(loadConfig({ env: { REVIEW_EDITOR: 'vim' }, readText: () => null }).editor).toBe('vim');
+  expect(loadConfig({ env: { REVIEW_EDITOR: 'vim', GHR_EDITOR: 'code' }, readText: () => null }).editor).toBe('code');
+  const { defaultRcPath } = await import('../src/ui/shared');
+  expect(defaultRcPath('/home/s', {})).toBe('/home/s/.ghreviewrc.json');
+  expect(defaultRcPath('/home/s', { GHR_CONFIG: '/etc/ghr.json' })).toBe('/etc/ghr.json');
+});

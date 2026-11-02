@@ -1,4 +1,5 @@
 import { Agent } from '@mastra/core/agent';
+import { noopLogger } from '@mastra/core/logger';
 import { z } from 'zod';
 import { modelForStage, type Config } from './config';
 import type { Usage } from './cost';
@@ -63,12 +64,15 @@ export interface AgentStreamResult {
   textStream: ReadableStream<string> | AsyncIterable<string>;
   usage?: PromiseLike<unknown>;
   object?: PromiseLike<unknown>;
+  /** Mastra does not reject on provider errors (bad key, bad request); it ends the stream and reports them here. */
+  error?: unknown;
 }
 
 export interface AgentGenerateResult {
   text?: string;
   usage?: unknown;
   object?: unknown;
+  error?: unknown;
 }
 
 export interface AgentLike {
@@ -84,14 +88,17 @@ export interface AgentSpec {
 
 export type AgentFactory = (spec: AgentSpec) => AgentLike;
 
-function mastraAgentFactory(config: Config): AgentFactory {
+export function mastraAgentFactory(config: Config, providerFetch?: typeof fetch): AgentFactory {
   return ({ stage, model, instructions }) => {
     const agent = new Agent({
       id: `ghr-${stage}-${model.replace(/[^a-z0-9-]/gi, '-')}`,
       name: `gh-code-reviewer ${stage}`,
       instructions,
-      model: createLanguageModel(model, config),
+      model: createLanguageModel(model, config, { fetch: providerFetch }),
     });
+    // Provider errors are surfaced (once, with their status) by this client; Mastra's own logger would
+    // print a full stack trace for every attempt.
+    agent.__setLogger(noopLogger);
     // Mastra's message union does not accept a role union, and its option overloads are keyed on the
     // schema type; this seam passes both through untyped.
     const input = (messages: ChatMessage[]) => messages as Parameters<Agent['generate']>[0];
@@ -124,6 +131,31 @@ export class LLMTimeoutError extends Error {
     super(`${model} timed out after ${ms}ms waiting for ${TIMEOUT_WAITING_FOR[kind]}`);
     this.name = 'LLMTimeoutError';
   }
+}
+
+/** The model answered with nothing at all: no text, no object and no error (for example a refusal). */
+export class EmptyResponseError extends Error {
+  constructor(readonly model: string) {
+    super(`${model} returned an empty response`);
+    this.name = 'EmptyResponseError';
+  }
+}
+
+function statusOf(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const e = error as { statusCode?: unknown; status?: unknown };
+  const status = typeof e.statusCode === 'number' ? e.statusCode : e.status;
+  return typeof status === 'number' ? status : undefined;
+}
+
+/** A rejected credential: retrying, or trying another model with the same key, cannot help. */
+export function isAuthError(error: unknown): boolean {
+  const status = statusOf(error);
+  if (status === 401 || status === 403) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /invalid (x-)?api[- ]key|api key not valid|authentication[_ ]error|incorrect api key|permission[_ ]denied/i.test(
+    message,
+  );
 }
 
 /** Every model in the fallback chain, and the final non-streaming attempt, failed. */
@@ -256,6 +288,8 @@ export class MastraLLM implements StreamingLLMClient {
   private readonly log: (message: string) => void;
   readonly timings: TimingCollector;
   private callCounter = 0;
+  /** Providers that rejected our key in this run; their models are skipped from then on. */
+  private readonly rejectedProviders = new Map<Provider, string>();
 
   constructor(
     private readonly config: Config,
@@ -359,11 +393,20 @@ export class MastraLLM implements StreamingLLMClient {
 
   private async call(stage: Stage, messages: ChatMessage[], plan: CallPlan): Promise<AttemptOutcome> {
     const callId = `${stage}-${++this.callCounter}`;
-    const chain = this.modelChain(plan.model ?? modelForStage(this.config, stage));
+    const fullChain = this.modelChain(plan.model ?? modelForStage(this.config, stage));
+    const usable = (model: string) => {
+      const provider = this.providerOf(model);
+      return !provider || !this.rejectedProviders.has(provider);
+    };
     const failures: string[] = [];
     const causes: unknown[] = [];
+    const rejected = () =>
+      [...this.rejectedProviders].map(([provider, reason]) => `${provider} rejected the API key (${reason})`);
 
-    for (const model of chain) {
+    if (!fullChain.some(usable)) throw new CriticalFailureError(stage, fullChain, rejected());
+
+    for (const model of fullChain) {
+      if (!usable(model)) continue;
       try {
         return await withRetry(() => this.attempt(callId, stage, model, messages, plan, 'stream'), {
           retries: this.config.maxRetries,
@@ -375,10 +418,19 @@ export class MastraLLM implements StreamingLLMClient {
       } catch (error) {
         failures.push(`${model}: ${errorMessage(error)}`);
         causes.push(error);
-        this.log(`${stage}: giving up on ${model}: ${errorMessage(error)}`);
+        const provider = this.providerOf(model);
+        if (provider && isAuthError(error)) {
+          // Every model of this provider uses the same key, so none of them can succeed.
+          this.rejectedProviders.set(provider, errorMessage(error));
+          this.log(`${stage}: ${provider} rejected the API key; skipping its models: ${errorMessage(error)}`);
+        } else {
+          this.log(`${stage}: giving up on ${model}: ${errorMessage(error)}`);
+        }
       }
     }
 
+    const chain = fullChain.filter(usable);
+    if (chain.length === 0) throw new CriticalFailureError(stage, fullChain, [...failures, ...rejected()], causes);
     const last = chain[chain.length - 1]!;
     try {
       return await this.attempt(callId, stage, last, messages, plan, 'generate');
@@ -500,7 +552,7 @@ export class MastraLLM implements StreamingLLMClient {
       );
       object = settled === TIMED_OUT ? undefined : settled;
     }
-    if (!text && object === undefined) throw new Error(`no data received from ${model}`);
+    if (!text && object === undefined) throw opened.error ?? new EmptyResponseError(model);
 
     probe.usage = await this.settleUsage(opened.usage, partial, messages, text);
     return { text, usage: probe.usage, model, partial, object };
@@ -538,7 +590,7 @@ export class MastraLLM implements StreamingLLMClient {
     const result = await raceTimeout(agent.generate(messages, callOptions), this.timeouts.generateMs);
     if (result === TIMED_OUT) throw new LLMTimeoutError('generate', model, this.timeouts.generateMs);
     const text = result.text ?? '';
-    if (!text && result.object === undefined) throw new Error(`no data received from ${model}`);
+    if (!text && result.object === undefined) throw result.error ?? new EmptyResponseError(model);
     const reported = toUsage(result.usage);
     probe.usage =
       reported.inputTokens > 0 || reported.outputTokens > 0 ? reported : this.estimate(messages, text);

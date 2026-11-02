@@ -99,9 +99,24 @@ function parseLine(value: unknown): number | undefined {
   return Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
+const SEVERITY_SYNONYMS: Record<string, Severity> = {
+  blocker: 'critical',
+  severe: 'critical',
+  major: 'high',
+  error: 'high',
+  moderate: 'medium',
+  warning: 'medium',
+  minor: 'low',
+  info: 'low',
+  note: 'low',
+  trivial: 'low',
+};
+
+/** Models sometimes use their own scale; map common words so `--fail-on` is not silently weakened. */
 function normalizeSeverity(value: string | null | undefined): Severity {
   const v = (value ?? '').trim().toLowerCase();
-  return (SEVERITY_ORDER as string[]).includes(v) ? (v as Severity) : 'low';
+  if ((SEVERITY_ORDER as string[]).includes(v)) return v as Severity;
+  return SEVERITY_SYNONYMS[v] ?? 'medium';
 }
 
 function normalizeCategory(value: string | null | undefined): string {

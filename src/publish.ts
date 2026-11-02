@@ -1,5 +1,5 @@
 import { commentableLines } from './diff';
-import type { GitHubClient, InlineComment } from './github/client';
+import { GitHubError, type GitHubClient, type InlineComment } from './github/client';
 import { personaByKey, type Persona } from './personas';
 import {
   hasTestingContent,
@@ -188,25 +188,37 @@ export async function publishToGitHub(
   const plan = planComments(report, changeSet);
   const max = options.maxCommentChars ?? MAX_COMMENT_CHARS;
 
-  // Re-running on a new commit should not repeat comments that are already on the PR.
+  // Re-running on a new commit should not repeat comments that are already on the PR. After a push, older
+  // comments become "outdated" (line null), so a matching title on the same file counts as already posted.
   const existing = plan.inline.length ? await github.listReviewComments(ref) : [];
   const fresh = plan.inline.filter(
     ({ comment, finding }) =>
-      !existing.some(e => e.path === comment.path && e.line === comment.line && e.body.includes(finding.title)),
+      !existing.some(
+        e => e.path === comment.path && (e.line === comment.line || e.line === null) && e.body.includes(finding.title),
+      ),
   );
 
+  // GitHub rejects the whole review if any one inline comment is invalid (422). The summary must still go
+  // out, so those findings are moved into it instead of failing the run.
+  let inlinePosted = fresh.length;
   if (fresh.length) {
-    await github.createReview(
-      ref,
-      report.headSha,
-      `gh-code-reviewer left ${fresh.length} inline comment(s). See the summary comment for the overview.`,
-      fresh.map(f => f.comment),
-    );
+    try {
+      await github.createReview(
+        ref,
+        report.headSha,
+        `gh-code-reviewer left ${fresh.length} inline comment(s). See the summary comment for the overview.`,
+        fresh.map(f => f.comment),
+      );
+    } catch (error) {
+      if (!(error instanceof GitHubError) || error.status !== 422) throw error;
+      plan.general.push(...fresh.map(f => f.finding));
+      inlinePosted = 0;
+    }
   }
 
   const summary = await upsertParts(github, ref, SUMMARY_MARKER, summaryBody(report, plan, changeSet, options), max);
   const result: PublishResult = {
-    inlinePosted: fresh.length,
+    inlinePosted,
     duplicatesSkipped: plan.inline.length - fresh.length,
     summary: summary.result,
     summaryParts: summary.parts,

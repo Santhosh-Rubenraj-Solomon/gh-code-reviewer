@@ -18,7 +18,6 @@ const RETRYABLE_MESSAGE = new RegExp(
     'timed? ?out',
     'timeout',
     'deadline exceeded',
-    'no data received',
     'server error',
     'bad gateway',
     'service unavailable',
@@ -45,7 +44,7 @@ export function isRetryableError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const e = error as { name?: unknown; status?: unknown; statusCode?: unknown; code?: unknown; message?: unknown };
   // A critical failure already exhausted every model; retrying it would repeat the whole chain.
-  if (e.name === 'CriticalFailureError') return false;
+  if (e.name === 'CriticalFailureError' || e.name === 'EmptyResponseError') return false;
   const status = typeof e.status === 'number' ? e.status : e.statusCode;
   if (typeof status === 'number') return isRetryableStatus(status);
   if (typeof e.code === 'string' && RETRYABLE_CODES.has(e.code)) return true;

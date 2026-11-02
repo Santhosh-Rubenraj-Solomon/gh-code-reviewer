@@ -77,7 +77,7 @@ export function defaultConfig(home: string = homedir()): Config {
     skipValidation: false,
     personaDir: join(home, '.gh-code-reviewer', 'personas'),
     docsNotice: false,
-    editor: process.env.REVIEW_EDITOR ?? '',
+    editor: '',
     rules: { maxFileChars: 10_000, maxTotalChars: 50_000 },
   };
 }
@@ -138,7 +138,7 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
   if (env.GHR_MODEL_DEEP) config.tiers.deep = env.GHR_MODEL_DEEP;
   if (env.GHR_MODEL_BALANCED) config.tiers.balanced = env.GHR_MODEL_BALANCED;
   if (env.GHR_MODEL_CHEAP) config.tiers.cheap = env.GHR_MODEL_CHEAP;
-  if (env.GHR_EDITOR) config.editor = env.GHR_EDITOR;
+  if (env.GHR_EDITOR || env.REVIEW_EDITOR) config.editor = (env.GHR_EDITOR || env.REVIEW_EDITOR)!;
   if (env.GHR_UPDATE_REPO) config.updateRepo = env.GHR_UPDATE_REPO;
 
   validateConfig(config);

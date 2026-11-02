@@ -83,10 +83,11 @@ export function missingKeys(modelIds: string[], keys: ProviderKeys): string[] {
   return missing;
 }
 
-export function createLanguageModel(id: string, keys: ProviderKeys) {
+/** `fetch` is injectable so tests can drive the real provider code against a fake HTTP server. */
+export function createLanguageModel(id: string, keys: ProviderKeys, options: { fetch?: typeof fetch } = {}) {
   const { provider, model } = parseModelId(id);
   if (provider === 'anthropic') {
-    return createAnthropic({ apiKey: keys.anthropicApiKey })(model);
+    return createAnthropic({ apiKey: keys.anthropicApiKey, fetch: options.fetch })(model);
   }
-  return createGoogleGenerativeAI({ apiKey: keys.googleApiKey })(model);
+  return createGoogleGenerativeAI({ apiKey: keys.googleApiKey, fetch: options.fetch })(model);
 }

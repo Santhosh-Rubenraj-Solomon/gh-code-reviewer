@@ -230,6 +230,13 @@ describe('reviewCommand (local)', () => {
     expect(s.progress!.snapshot().steps.find(st => st.id === 'review')?.status).toBe('failed');
   });
 
+  test('--post outside a pull request is rejected before any model call', async () => {
+    const dir = makeRepo();
+    const s = services(dir);
+    await expect(reviewCommand({ mode: 'local', target: 'main', title: 't', post: true }, s)).rejects.toThrow(/--post only works/);
+    expect((s.llm as FakeLLM).calls).toHaveLength(0);
+  });
+
   test('impact-only writes graphs and a test plan without any model call', async () => {
     const dir = makeRepo();
     const s = services(dir);

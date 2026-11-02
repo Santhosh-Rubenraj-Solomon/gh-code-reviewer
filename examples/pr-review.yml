@@ -16,11 +16,15 @@ concurrency:
 
 jobs:
   review:
-    if: github.event.pull_request.draft == false
+    # Fork PRs get no secrets; skip them instead of failing the check.
+    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       # Checkout lets the reviewer read .github/code-review.md (team rules).
       - uses: actions/checkout@v4
+        with:
+          # The PR head, so impact analysis reads the same revision as the diff.
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: Santhosh-Rubenraj-Solomon/gh-code-reviewer@v0.2.0
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}

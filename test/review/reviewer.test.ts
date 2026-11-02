@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BatchItem } from '../../src/pipeline/batcher';
-import { batchCacheKey, buildReviewPrompt, dumpRawResponse, reviewBatch, type ReviewContext } from '../../src/pipeline/reviewer';
+import { parseReviewResponse, batchCacheKey, buildReviewPrompt, dumpRawResponse, reviewBatch, type ReviewContext } from '../../src/pipeline/reviewer';
 import type { FileReview } from '../../src/types';
 import { FakeLLM, file, finding, makeDeps, SQL_CONTENT } from '../helpers';
 
@@ -273,5 +273,27 @@ describe('raw response debug dump', () => {
     expect(b).not.toBeNull();
     expect(a).not.toBe(b);
     expect(readdirSync(dir)).toHaveLength(2);
+  });
+});
+
+describe('severity words from the model', () => {
+  test.each([
+    ['blocker', 'critical'],
+    ['Major', 'high'],
+    ['warning', 'medium'],
+    ['minor', 'low'],
+    ['something-odd', 'medium'],
+  ])('%s becomes %s', (word, expected) => {
+    const text = JSON.stringify({
+      fileReviews: [
+        {
+          path: 'a.ts',
+          whatChanged: 'x',
+          findings: [{ severity: word, category: 'bug', title: 'T', explanation: 'E', evidence: 'code()' }],
+        },
+      ],
+    });
+    const parsed = parseReviewResponse(text, new Set(['a.ts']), () => {});
+    expect(parsed.reviews.get('a.ts')?.findings[0]?.severity).toBe(expected as never);
   });
 });

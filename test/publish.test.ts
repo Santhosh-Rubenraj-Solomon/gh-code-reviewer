@@ -126,3 +126,37 @@ describe('publishToGitHub', () => {
     ]);
   });
 });
+
+describe('publishToGitHub resilience', () => {
+  const ref = { owner: 'santhosh', repo: 'demo', number: 7 };
+  const cs = changeSet([file({ path: 'src/users.ts' })]);
+
+  test('a rejected inline review (422) still posts the summary, with the findings moved into it', async () => {
+    const fake = fakeFetch([
+      { method: 'GET', match: /\/pulls\/7\/comments$/, respond: () => ({ json: [] }) },
+      { method: 'POST', match: /\/reviews$/, respond: () => ({ status: 422, text: 'line must be part of the diff' }) },
+      { method: 'GET', match: /\/issues\/7\/comments$/, respond: () => ({ json: [] }) },
+      { method: 'POST', match: /\/issues\/7\/comments$/, respond: () => ({ status: 201, json: {} }) },
+    ]);
+    const gh = new GitHubClient({ token: 't', fetch: fake.fetch, sleep: async () => {} });
+    const result = await publishToGitHub(gh, ref, report(), cs);
+    expect(result.inlinePosted).toBe(0);
+    const summary = fake.requests.find(r => r.method === 'POST' && r.url.includes('/issues/7/comments'))!;
+    expect((summary.body as { body: string }).body).toContain('### Details');
+  });
+
+  test('an outdated comment with the same title is not posted again', async () => {
+    const fake = fakeFetch([
+      {
+        method: 'GET',
+        match: /\/pulls\/7\/comments$/,
+        respond: () => ({ json: [{ path: 'src/users.ts', line: null, body: '**🛑 Critical · security: SQL injection in findUser**' }] }),
+      },
+      { method: 'GET', match: /\/issues\/7\/comments$/, respond: () => ({ json: [] }) },
+      { method: 'POST', match: /\/issues\/7\/comments$/, respond: () => ({ status: 201, json: {} }) },
+    ]);
+    const gh = new GitHubClient({ token: 't', fetch: fake.fetch });
+    const result = await publishToGitHub(gh, ref, report(), cs);
+    expect(result).toMatchObject({ inlinePosted: 0, duplicatesSkipped: 1 });
+  });
+});

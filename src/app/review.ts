@@ -170,6 +170,10 @@ export async function reviewCommand(options: ReviewCommandOptions, services: Rev
     if (usd > 0) logger.addCost(usd, step);
   });
 
+  if (options.post && options.mode !== 'pr') {
+    throw new Error('--post only works when reviewing a pull request (ghr review <pr> --post)');
+  }
+
   mark('fetch', 'running');
   const changeSet = await loadChanges(options, services);
   mark('fetch', 'completed', `${changeSet.files.length} file(s)`);

@@ -9,7 +9,6 @@ test.each([
   'request timed out',
   'Timeout while waiting',
   'deadline exceeded',
-  'no data received from model',
   'Internal server error',
   'Bad Gateway',
   'Service Unavailable',
@@ -23,7 +22,7 @@ test.each([
   expect(isRetryableError(new Error(message))).toBe(true);
 });
 
-test.each(['invalid api key', 'schema mismatch', 'not found'])('not retryable: %s', message => {
+test.each(['invalid api key', 'schema mismatch', 'not found', 'no data received from model'])('not retryable: %s', message => {
   expect(isRetryableError(new Error(message))).toBe(false);
 });
 
@@ -53,4 +52,8 @@ test('no sleep after the final failure', async () => {
   );
   expect(calls).toBe(3);
   expect(delays).toEqual([5, 10]);
+});
+
+test('an empty answer is not retried on the same model', () => {
+  expect(isRetryableError(Object.assign(new Error('x returned an empty response'), { name: 'EmptyResponseError' }))).toBe(false);
 });

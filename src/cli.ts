@@ -67,6 +67,13 @@ const cli = meow(
     --fresh                    Ignore cached reviews for this commit
     --ci                       No interactive UI; plain log output (automatic when CI=true)
 
+  Command options
+    --days <n>, --dry-run      cleanup: age cut-off (default 30) and preview without deleting
+    --cache                    cleanup: forget every cached review
+    --type <kind>              memory add: preference | pattern | decision | feedback | context
+    --yes                      memory clear: confirm
+    --suggest                  verify-rules: ask a model for improvements
+
   Other commands
     $ ghr setup                Guided setup of keys, persona and editor
     $ ghr config [models]      Show the config (secrets masked), or choose models per tier and stage
@@ -80,7 +87,9 @@ const cli = meow(
     $ ghr changelog            Latest release notes (needs updateRepo in the config)
 
   Environment
-    ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, GITHUB_TOKEN; settings in ~/.ghreviewrc.json
+    ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, GITHUB_TOKEN, GITHUB_API_URL,
+    GHR_PERSONA, GHR_MODEL_DEEP/BALANCED/CHEAP, GHR_CONFIG, GHR_DATA_DIR, GHR_EDITOR, GHR_NO_DEBUG
+    Settings live in ~/.ghreviewrc.json (or $GHR_CONFIG)
 `,
   {
     importMeta: import.meta,

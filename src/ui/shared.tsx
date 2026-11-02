@@ -12,8 +12,9 @@ export const SEVERITY_COLORS: Record<Severity, string> = {
   low: 'blue',
 };
 
-export function defaultRcPath(home: string = homedir()): string {
-  return join(home, '.ghreviewrc.json');
+/** The config file every command reads and writes: `$GHR_CONFIG` when set, else `~/.ghreviewrc.json`. */
+export function defaultRcPath(home: string = homedir(), env: Record<string, string | undefined> = process.env): string {
+  return env.GHR_CONFIG || join(home, '.ghreviewrc.json');
 }
 
 export type RcObject = Record<string, unknown>;

@@ -25,7 +25,7 @@ changes ──► impact analysis ──► docs summary ──► triage ──
 | --- | --- | --- |
 | Impact analysis | none (static) | review continues without ripple-effect context |
 | Docs summary, triage, batch planning | cheap (`claude-haiku-5-5`) | heuristic summary · every file reviewed · size-based batches |
-| Deep review | deep (`claude-opus-5-5`) | affected files marked failed; the run is not cached |
+| Deep review | deep (`claude-opus-5-5`) | a bad answer marks those files failed and the run is not cached; if every model fails, the run stops with the reason |
 | Critic | balanced (`claude-sonnet-5-5`) | grounded findings kept, report marked "not double-checked" |
 | Consolidation | deep | summary built from the verified findings |
 | Evidence check | balanced | summary kept unchanged |
@@ -67,13 +67,14 @@ model failed.
 | `docs-notice` | `false` | note on the PR when code changed but docs did not |
 | `export-tests` | `false` | write `test-plan.json` and impact graphs to the `output-dir` output |
 
-PRs from forks do not receive secrets, so the review is skipped there unless you deliberately use
-`pull_request_target` (read GitHub's security guidance first).
+PRs from forks do not receive secrets, so the example workflow skips them (its `if:` compares the PR's
+head repository with this one). Reviewing fork PRs needs `pull_request_target`; read GitHub's security
+guidance before switching.
 
 ## Command line
 
 ```bash
-bun install
+bun install && bun link                     # installs dependencies and puts `ghr` on your PATH
 ghr setup                                   # guided: keys (validated), GitHub token, persona, editor
 
 ghr review https://github.com/o/r/pull/12   # print the review
@@ -86,10 +87,10 @@ ghr local --rerun-last                      # repeat the last review
 ghr impact --export-tests                   # impact graph, blast radius, test plan; no model calls
 ```
 
-Other commands: `ghr models`, `ghr config` (secrets masked) / `ghr config models` (models per tier
+Other commands: `ghr models`, `ghr config` (shows the config with secrets masked; runs `setup` if there is none) / `ghr config models` (models per tier
 and stage), `ghr memory list|add|search|delete|compact|clear|export|import`, `ghr sessions
 list|show|delete`, `ghr cleanup [--days=30] [--dry-run] [--cache]`, `ghr verify-rules [--suggest]`,
-`ghr check-github [pr]`, `ghr changelog`. Run `ghr --help` for every flag.
+`ghr check-github [pr]`, `ghr changelog`. `ghr --help` lists the flags.
 
 ### Interactive mode
 
@@ -139,14 +140,15 @@ Precedence: defaults < `~/.ghreviewrc.json` (or `$GHR_CONFIG`) < environment.
 
 Environment: `ANTHROPIC_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` (or `GEMINI_API_KEY`),
 `GITHUB_TOKEN` (or `GH_TOKEN`), `GITHUB_API_URL` (GitHub Enterprise), `GHR_PERSONA`,
-`GHR_MODEL_DEEP|BALANCED|CHEAP`, `GHR_DATA_DIR`, `GHR_EDITOR`, `GHR_UPDATE_REPO`, `GHR_NO_DEBUG`.
+`GHR_MODEL_DEEP|BALANCED|CHEAP`, `GHR_CONFIG`, `GHR_DATA_DIR`, `GHR_EDITOR` (or `REVIEW_EDITOR`),
+`GHR_UPDATE_REPO`, `GHR_NO_DEBUG`.
 
 Custom personas: JSON files in `~/.gh-code-reviewer/personas/`.
 
 ## Stack
 
-TypeScript on Bun · Mastra agents, one per stage · Vercel AI SDK (Claude, Gemini) · zod structured
-output · tree-sitter (TS/JS) · GitHub REST via `fetch` · LMDB sessions and caches · Ink + React
+TypeScript on Bun · Mastra agents per stage and model · Vercel AI SDK (Claude, Gemini) · zod-validated
+model output · tree-sitter (TS/JS) · GitHub REST via `fetch` · LMDB sessions and caches · Ink + React
 terminal UI · meow CLI · js-tiktoken.
 
 ## Layout

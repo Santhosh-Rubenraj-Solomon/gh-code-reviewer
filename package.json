@@ -32,8 +32,7 @@
   "scripts": {
     "start": "bun run src/cli.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit",
-    "build": "bun build src/cli.ts --compile --outfile ghr"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.44",
