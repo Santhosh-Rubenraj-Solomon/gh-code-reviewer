@@ -4,6 +4,27 @@
   "description": "Multi-stage LLM code review for GitHub pull requests: triage, review, critic, summary.",
   "author": "Santhosh Rubenraj",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Santhosh-Rubenraj-Solomon/gh-code-reviewer.git"
+  },
+  "homepage": "https://github.com/Santhosh-Rubenraj-Solomon/gh-code-reviewer#readme",
+  "bugs": {
+    "url": "https://github.com/Santhosh-Rubenraj-Solomon/gh-code-reviewer/issues"
+  },
+  "keywords": [
+    "code-review",
+    "github-action",
+    "llm",
+    "pull-request",
+    "claude",
+    "gemini",
+    "mastra",
+    "tree-sitter"
+  ],
+  "engines": {
+    "bun": ">=1.4"
+  },
   "type": "module",
   "bin": {
     "ghr": "src/cli.ts"
